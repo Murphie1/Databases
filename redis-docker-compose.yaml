@@ -1,0 +1,13 @@
+# docker-compose.redis-stack.yml
+version: "3.8"
+services:
+  redis-stack:
+    image: redis/redis-stack:latest
+    container_name: redis-stack
+    command: ["redis-server", "--port", "6380", "--loadmodule", "/opt/redis-stack/lib/rejson.so"]
+    ports:
+      - "6380:6380"
+    volumes:
+      - redis_data:/data
+volumes:
+  redis_data:
