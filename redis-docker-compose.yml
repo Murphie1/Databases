@@ -11,3 +11,10 @@ services:
       - redis_data:/data
 volumes:
   redis_data:
+
+
+  #docker compose -f redis-docker-compose.yml up -d
+  #RedisJson call:
+  #await redis.call("JSON.SET", "user:1", "$", JSON.stringify({ name: "Michael" }));
+  #const user = JSON.parse(await redis.call("JSON.GET", "user:1", "$"));
+  #console.log(user);
