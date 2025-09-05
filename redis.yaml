@@ -1,4 +1,5 @@
 # redis-stack-k8s.yaml
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -16,23 +17,23 @@ spec:
         app: redis-stack
     spec:
       containers:
-      - name: redis-stack
-        image: redis/redis-stack:latest
-        ports:
-        - containerPort: 6380
-          name: redis
-        volumeMounts:
-        - name: redis-data
-          mountPath: /data
-        command: ["redis-server", "--port", "6380", "--loadmodule", "/opt/redis-stack/lib/rejson.so"]
+        - name: redis-stack
+          image: redis/redis-stack:latest
+          ports:
+            - containerPort: 6380
+              name: redis
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          command: ["redis-server", "--port", "6380", "--loadmodule", "/opt/redis-stack/lib/rejson.so"]
   volumeClaimTemplates:
-  - metadata:
-      name: redis-data
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      resources:
-        requests:
-          storage: 2Gi
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
 ---
 apiVersion: v1
 kind: Service
@@ -42,9 +43,23 @@ metadata:
 spec:
   selector:
     app: redis-stack
-  type: NodePort # or LoadBalancer if LB available
+  type: ClusterIP
   ports:
     - name: redis
       protocol: TCP
       port: 6380
       targetPort: 6380
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: redis-stack-tcp
+  namespace: default
+spec:
+  entryPoints:
+    - redis
+  routes:
+    - match: HostSNI(`redis.nxgn.space`)
+      services:
+        - name: redis-stack
+          port: 6380
