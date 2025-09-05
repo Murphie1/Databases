@@ -6,9 +6,9 @@ services:
     container_name: postgres
     restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: Graktong1$
-      POSTGRES_DB: hakima_db
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "Graktong1$"
+      POSTGRES_DB: "main"
     volumes:
       - pg_data:/var/lib/postgresql/data
     networks:
