@@ -7,12 +7,18 @@ services:
     restart: always
     environment:
       POSTGRES_USER: "postgres"
-      POSTGRES_PASSWORD: "Graktong1$"
+      POSTGRES_PASSWORD: "Graktong1$$"  # Escaped $ with another $
       POSTGRES_DB: "main"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.postgres.rule=HostSNI(`postgres.nxgn.space`)"
+      - "traefik.tcp.routers.postgres.entrypoints=postgres"
+      - "traefik.tcp.services.postgres.loadbalancer.server.port=5432"
     networks:
       - backend
+      - proxy
 
   pgadmin:
     image: dpage/pgadmin4
@@ -35,6 +41,7 @@ services:
     image: qdrant/qdrant
     container_name: qdrant
     restart: always
+    command: --host 0.0.0.0
     volumes:
       - qdrant_data:/qdrant/storage
     labels:
@@ -50,21 +57,24 @@ services:
     container_name: traefik
     restart: always
     command:
-      - "--api.insecure=true"              # remove in production if you don’t want dashboard exposed
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.postgres.address=:5432"
     ports:
       - "80:80"
-      - "8080:8080"  # Traefik dashboard (http://localhost:8080)
+      - "5432:5432"  # PostgreSQL port
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
+      - backend
       - proxy
 
 volumes:
   pg_data:
+    driver: local
   qdrant_data:
+    driver: local
 
 networks:
   backend:
