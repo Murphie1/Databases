@@ -1,0 +1,50 @@
+# redis-stack-k8s.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-stack
+  namespace: default
+spec:
+  serviceName: redis-stack
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-stack
+  template:
+    metadata:
+      labels:
+        app: redis-stack
+    spec:
+      containers:
+      - name: redis-stack
+        image: redis/redis-stack:latest
+        ports:
+        - containerPort: 6380
+          name: redis
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        command: ["redis-server", "--port", "6380", "--loadmodule", "/opt/redis-stack/lib/rejson.so"]
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-stack
+  namespace: default
+spec:
+  selector:
+    app: redis-stack
+  type: NodePort # or LoadBalancer if LB available
+  ports:
+    - name: redis
+      protocol: TCP
+      port: 6380
+      targetPort: 6380
