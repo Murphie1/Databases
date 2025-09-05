@@ -100,7 +100,20 @@ metadata:
   name: traefik
   namespace: traefik
 spec:
-  type: LoadBalancer  # works in k3s with cloud LB or MetalLB
+  type: NodePort
+  ports:
+    - name: web
+      port: 80
+      targetPort: 80
+      nodePort: 30080   # choose fixed NodePort
+    - name: websecure
+      port: 443
+      targetPort: 443
+      nodePort: 30443   # optional if you want TLS later
+    - name: redis
+      port: 6380
+      targetPort: 6380
+      nodePort: 30379   # fixed NodePort for Redis
   selector:
     app: traefik
   ports:
