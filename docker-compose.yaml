@@ -52,7 +52,7 @@ services:
       - backend
       - proxy
 
-  databases-traefik:
+  traefik:
     image: traefik:v3.0
     container_name: traefik
     restart: always
