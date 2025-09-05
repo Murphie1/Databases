@@ -79,3 +79,5 @@ volumes:
 networks:
   backend:
   proxy:
+    external: true
+    name: traefik-public
