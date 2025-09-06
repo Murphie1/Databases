@@ -1,0 +1,222 @@
+version: "3.9"
+
+services:
+  # External Traefik - handles all reverse proxying
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik-main
+    restart: always
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.file.directory=/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.postgres.address=:5432"
+      - "--certificatesresolvers.letsencrypt.acme.email=your-email@domain.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--log.level=INFO"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "5432:5432"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/acme.json
+      - ./traefik/dynamic:/dynamic:ro
+    labels:
+      - "traefik.enable=true"
+      # Dashboard
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.nxgn.space`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=auth"
+      # Basic Auth for dashboard
+      - "traefik.http.middlewares.auth.basicauth.users=admin:$$2y$$10$$K8V2VKa9/w.xkT8BcGJ5/.8YvuE4z8E4g4KjHq2QG5xKZ8yJ8Js2."
+      # HTTP to HTTPS redirect
+      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+    networks:
+      - proxy
+    environment:
+      - "TRAEFIK_LOG_LEVEL=INFO"
+
+  # Coolify Database
+  coolify-db:
+    image: postgres:16-alpine
+    container_name: coolify-db
+    restart: always
+    environment:
+      POSTGRES_USER: coolify
+      POSTGRES_PASSWORD: ${COOLIFY_DB_PASSWORD:-coolify_secure_password}
+      POSTGRES_DB: coolify
+    volumes:
+      - coolify-postgres:/var/lib/postgresql/data
+    networks:
+      - coolify-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coolify"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Coolify Redis
+  coolify-redis:
+    image: redis:7-alpine
+    container_name: coolify-redis
+    restart: always
+    networks:
+      - coolify-internal
+    volumes:
+      - coolify-redis:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Coolify Application
+  coolify:
+    image: ghcr.io/coollabsio/coolify:latest
+    container_name: coolify
+    restart: always
+    depends_on:
+      coolify-db:
+        condition: service_healthy
+      coolify-redis:
+        condition: service_healthy
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${COOLIFY_APP_KEY}
+      - DATABASE_URL=postgresql://coolify:${COOLIFY_DB_PASSWORD:-coolify_secure_password}@coolify-db:5432/coolify
+      - REDIS_HOST=coolify-redis
+      - REDIS_PORT=6379
+      - APP_URL=https://coolify.nxgn.space
+      - PUSHER_HOST=coolify.nxgn.space
+      - PUSHER_PORT=443
+      - PUSHER_SCHEME=https
+      - SSL_MODE=off  # SSL handled by external Traefik
+    volumes:
+      - coolify-data:/app/data
+      - coolify-ssh:/app/ssh
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./coolify/ssh:/root/.ssh:ro
+    networks:
+      - coolify-internal
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.coolify.rule=Host(`coolify.nxgn.space`)"
+      - "traefik.http.routers.coolify.entrypoints=websecure"
+      - "traefik.http.routers.coolify.tls.certresolver=letsencrypt"
+      - "traefik.http.services.coolify.loadbalancer.server.port=8080"
+      - "traefik.docker.network=proxy"
+    # Security improvements
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    read_only: false  # Coolify needs write access
+    tmpfs:
+      - /tmp:size=100M
+
+  # Your PostgreSQL service
+  postgres:
+    image: ankane/pgvector
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: main
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.postgres.rule=HostSNI(`postgres.nxgn.space`)"
+      - "traefik.tcp.routers.postgres.entrypoints=postgres"
+      - "traefik.tcp.services.postgres.loadbalancer.server.port=5432"
+      - "traefik.tcp.routers.postgres.tls.passthrough=true"
+    networks:
+      - backend
+      - proxy
+
+  # pgAdmin
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.rule=Host(`admin.postgres.nxgn.space`)"
+      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+    networks:
+      - backend
+      - proxy
+
+  # Qdrant
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    restart: always
+    command: ["--host", "0.0.0.0"]
+    volumes:
+      - qdrant_data:/qdrant/storage
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qdrant.rule=Host(`qdrant.nxgn.space`)"
+      - "traefik.http.routers.qdrant.entrypoints=websecure"
+      - "traefik.http.routers.qdrant.tls.certresolver=letsencrypt"
+      - "traefik.http.services.qdrant.loadbalancer.server.port=6333"
+    networks:
+      - backend
+      - proxy
+
+volumes:
+  coolify-data:
+    driver: local
+  coolify-postgres:
+    driver: local
+  coolify-redis:
+    driver: local
+  coolify-ssh:
+    driver: local
+  pg_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  proxy:
+    external: false
+    name: proxy
+  backend:
+    driver: bridge
+  coolify-internal:
+    driver: bridge
+    internal: true
